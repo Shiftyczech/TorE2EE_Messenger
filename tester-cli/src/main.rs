@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,7 @@ struct SendMessageReq {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SendMessageResp {
     status: String,
     delivered_live: bool,
@@ -424,3 +425,4 @@ async fn run_e2e_tests(server_url: &str, ws_url: &str) -> Result<()> {
 
     Ok(())
 }
+

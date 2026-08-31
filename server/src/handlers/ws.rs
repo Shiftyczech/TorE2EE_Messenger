@@ -162,8 +162,6 @@ async fn handle_ws_session(mut socket: WebSocket, state: AppState) {
     });
 
     // Task for reading incoming messages from WebSocket client (pings, keep-alives)
-    let state_clone = state.clone();
-    let hash_clone = pubkey_hash.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
@@ -171,7 +169,7 @@ async fn handle_ws_session(mut socket: WebSocket, state: AppState) {
                     if let Ok(client_msg) = serde_json::from_str::<ClientWsMessage>(&text) {
                         match client_msg {
                             ClientWsMessage::Ping => {
-                                // Handled if sender is alive, or axum ws handles ping frames automatically
+                                // Keep-alive handled
                             }
                             _ => {}
                         }
@@ -189,6 +187,6 @@ async fn handle_ws_session(mut socket: WebSocket, state: AppState) {
         _ = (&mut recv_task) => send_task.abort(),
     };
 
-    // Peer disconnected
     tracing::debug!("Client disconnected for hash: {}", &pubkey_hash[..8]);
 }
+

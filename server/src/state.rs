@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 pub type Tx = mpsc::UnboundedSender<QueuedMessage>;
-pub type Rx = mpsc::UnboundedReceiver<QueuedMessage>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -50,3 +49,4 @@ impl AppState {
         }
     }
 }
+

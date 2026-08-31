@@ -31,3 +31,4 @@ impl Config {
         Config::parse()
     }
 }
+
