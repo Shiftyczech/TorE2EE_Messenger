@@ -28,7 +28,6 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
       expect(bundle.signedPreKey.publicKeyHex).toHaveLength(64);
       expect(bundle.signedPreKey.signatureHex).toHaveLength(128);
 
-      // Verify Ed25519 signature over SPK
       const isValid = IdentityManager.verifySignature(
         bundle.signedPreKey.publicKeyHex,
         bundle.signedPreKey.signatureHex,
@@ -43,13 +42,9 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
 
   describe('X3DH Session Initiation and Two-Way Conversation', () => {
     it('establishes session and exchanges messages between Alice and Bob', async () => {
-      // 1. Bob publishes PreKeyBundle
       const bobBundle = await bobEngine.generatePreKeyBundle(5);
-
-      // 2. Alice initiates session using Bob's bundle
       await aliceEngine.initiateSession(bobBundle.identityKeyHex, bobBundle);
 
-      // 3. Alice encrypts initial message
       const plaintext1 = 'Hello Bob! This is message 1.';
       const encryptedMsg1 = await aliceEngine.encrypt(
         bobBundle.identityKeyHex,
@@ -62,27 +57,22 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
       expect(encryptedMsg1.sequenceNumber).toBe(0);
       expect(encryptedMsg1.ciphertext).toBeDefined();
 
-      // 4. Bob receives and decrypts initial message (X3DH Bob side + Double Ratchet init)
       const aliceIdentity = await aliceStore.getIdentity();
       const aliceIdentityKeyHex = aliceIdentity.encryptionKey.publicKeyHex;
 
       const decrypted1 = await bobEngine.decrypt(aliceIdentityKeyHex, encryptedMsg1);
       expect(decrypted1).toBe(plaintext1);
 
-      // Verify Bob used and removed the One-Time PreKey (Forward Secrecy)
       const remainingOtks = await bobStore.countOneTimePreKeys();
       expect(remainingOtks).toBe(4);
 
-      // 5. Bob replies to Alice (triggers Asymmetric DH Ratchet step)
       const plaintext2 = 'Hi Alice! Received your message. Here is message 2.';
       const encryptedMsg2 = await bobEngine.encrypt(aliceIdentityKeyHex, plaintext2);
       expect(encryptedMsg2.sequenceNumber).toBe(0);
 
-      // 6. Alice decrypts Bob's reply
       const decrypted2 = await aliceEngine.decrypt(bobBundle.identityKeyHex, encryptedMsg2);
       expect(decrypted2).toBe(plaintext2);
 
-      // 7. Alice sends message 3
       const plaintext3 = 'Awesome! Double Ratchet is working seamlessly.';
       const encryptedMsg3 = await aliceEngine.encrypt(bobBundle.identityKeyHex, plaintext3);
       const decrypted3 = await bobEngine.decrypt(aliceIdentityKeyHex, encryptedMsg3);
@@ -96,7 +86,6 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
       const aliceIdentity = await aliceStore.getIdentity();
       const aliceIdentityKeyHex = aliceIdentity.encryptionKey.publicKeyHex;
 
-      // Alice sends 4 messages in a row
       const msg1 = await aliceEngine.encrypt(bobBundle.identityKeyHex, 'Sequential Msg 1', {
         oneTimePreKeyId: bobBundle.oneTimePreKey?.keyId,
       });
@@ -130,13 +119,8 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
       const msg2 = await aliceEngine.encrypt(bobBundle.identityKeyHex, 'Second Message');
       const msg3 = await aliceEngine.encrypt(bobBundle.identityKeyHex, 'Third Message');
 
-      // Bob decrypts msg1 first (initializes session)
       expect(await bobEngine.decrypt(aliceIdentityKeyHex, msg1)).toBe('First Message');
-
-      // Bob receives msg3 BEFORE msg2 (out of order)
       expect(await bobEngine.decrypt(aliceIdentityKeyHex, msg3)).toBe('Third Message');
-
-      // Bob receives msg2 later
       expect(await bobEngine.decrypt(aliceIdentityKeyHex, msg2)).toBe('Second Message');
     });
   });
@@ -153,9 +137,8 @@ describe('CryptoEngine (Double Ratchet + X3DH)', () => {
         oneTimePreKeyId: bobBundle.oneTimePreKey?.keyId,
       });
 
-      // Tamper with ciphertext
       const tamperedBytes = Buffer.from(msg.ciphertext, 'base64');
-      tamperedBytes[tamperedBytes.length - 1] ^= 0x01; // flip 1 bit
+      tamperedBytes[tamperedBytes.length - 1] ^= 0x01;
       const tamperedMsg = {
         ...msg,
         ciphertext: tamperedBytes.toString('base64'),

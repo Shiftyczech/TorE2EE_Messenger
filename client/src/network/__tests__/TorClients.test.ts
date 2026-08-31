@@ -6,7 +6,7 @@ import { TorManager } from '../TorManager';
 import { TorHttpClient } from '../TorHttpClient';
 import { TorWebSocketClient } from '../TorWebSocketClient';
 import { IdentityManager } from '../../identity/IdentityManager';
-import { TorConfig, WsClientState } from '../types';
+import { TorConfig, WsClientState, IncomingMessagePayload } from '../types';
 
 describe('Tor Network Modules', () => {
   describe('Socks5Tunnel', () => {
@@ -271,10 +271,10 @@ describe('Tor Network Modules', () => {
 
       return new Promise<void>(async (resolve, reject) => {
         const wsClient = new TorWebSocketClient(config, testIdentity, {
-          onAuthenticated: (pubkeyHash) => {
+          onAuthenticated: (pubkeyHash: string) => {
             expect(pubkeyHash).toBe(testIdentity.recipientPubkeyHash);
           },
-          onMessage: (msg) => {
+          onMessage: (msg: IncomingMessagePayload) => {
             try {
               expect(msg.encrypted_payload).toBe('ENC_TEST_PAYLOAD');
               expect(msg.nonce).toBe('NONCE_TEST');
@@ -287,7 +287,7 @@ describe('Tor Network Modules', () => {
               reject(err);
             }
           },
-          onError: (err) => {
+          onError: (err: Error) => {
             wsClient.disconnect();
             reject(err);
           },
@@ -322,3 +322,4 @@ function sendWsFrame(socket: net.Socket, text: string) {
 
   socket.write(Buffer.concat([header, payload]));
 }
+

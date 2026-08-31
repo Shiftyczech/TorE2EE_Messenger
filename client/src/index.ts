@@ -12,3 +12,9 @@ export * from './crypto/ISignalStore';
 export * from './crypto/InMemorySignalStore';
 export * from './crypto/CryptoEngine';
 
+export * from './storage/types';
+export * from './storage/DatabaseManager';
+export * from './storage/SqliteSignalStore';
+export * from './storage/ContactRepository';
+export * from './storage/MessageRepository';
+
