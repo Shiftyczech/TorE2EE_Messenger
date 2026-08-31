@@ -1,6 +1,6 @@
 # TorE2EE Messenger
 
-Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Multi-Device podporou (Linked Devices & Self-Sync Messages)**, **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu**.
+Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Multi-Device podporou (Linked Devices & Self-Sync Messages)**, **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu** kontejnerizovaným v **Docker Compose (Sidecar pattern)**.
 
 ---
 
@@ -33,16 +33,18 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
                               ┌──────────────────────────────────┐
                               │     Tor Network (Onion v3)       │
                               └────────────────┬─────────────────┘
-                                               │
+                                               │ (Port 80)
                                                ▼
  ┌──────────────────────────────────────────────────────────────────────────────────────────┐
- │                         BACKEND: Zero-Knowledge Relay (Rust)                            │
+ │                     DOCKER SIDECAR BACKEND ARCHITECTURE (Docker Compose)                 │
  │                                                                                          │
- │  ┌─────────────────────────┐   ┌──────────────────────────┐   ┌────────────────────────┐ │
- │  │   WebSocket Stream      │   │  Ed25519 Auth Challenge  │   │   SQLite TTL Queue     │ │
- │  │  (GET /api/v1/stream)   │◄─►│   (Cryptographic Nonce   │◄─►│  (Atomic delete on     │ │
- │  │  Real-time Delivery     │   │     Verification)        │   │   delivery, Auto-purge)│ │
- │  └─────────────────────────┘   └──────────────────────────┘   └────────────────────────┘ │
+ │  ┌────────────────────────────────────────┐     ┌─────────────────────────────────────┐  │
+ │  │      Tor Daemon (osminogin/tor-simple) │     │      Backend Container (Rust Axum)  │  │
+ │  │  - Exposes Onion v3 Hidden Service     │────►│  - Listens strictly on 0.0.0.0:3000 │  │
+ │  │  - Zero open ports to clearnet         │     │  - NO exposed ports to clearnet     │  │
+ │  │  - Directs port 80 -> backend:3000     │     │  - Non-root user `toruser`          │  │
+ │  │  - Persistent key volume: tor-keys     │     │  - SQLite volume: backend-data      │  │
+ │  └────────────────────────────────────────┘     └─────────────────────────────────────┘  │
  └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,52 +59,48 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
    - **Párování Master $\leftrightarrow$ Slave:** Sekundární zařízení (PC) vygeneruje efemérní Curve25519 klíč a dočasnou schránku v QR kódu. Mobil (Master) zašifruje provizní balíček a odešle jej přes Tor.
    - **Multi-Recipient Fanout:** Při odeslání zprávy zašifruje odesílatel zprávu samostatně pro všechna propojená zařízení příjemce.
    - **Self-Sync zprávy:** Odesílatel zašifruje kopii zprávy i pro svá vlastní sekundární zařízení (PC / Tablet), která ji uloží jako odeslanou (`isOutgoing = true`).
-5. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá síťová komunikace (HTTP POST pro odesílání i WebSocket pro příjem) je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`).
-6. **SQLCipher šifrované lokální úložiště:** Lokální databáze SQLite je šifrována 256bitovým náhodným klíčem z hardwarového Keychainu s automatickými migracemi schématu (v1 a v2).
-7. **Zero Push Metadata Leak:** Periodický headless background sync bez FCM a APNs s garancí nepřekročení časového rozpočtu OS.
+5. **Kontejnerizace a Izolace (Docker Sidecar Pattern):**
+   - Backend nemá žádné mapované porty do clearnetu (`ports:` je záměrně vynecháno).
+   - Tor démon jako sidecar kontejner vytváří `.onion` adresu a veškerý provoz směruje interní Docker sítí do backendu na `backend:3000`.
+   - Multi-stage Dockerfile sestavuje minimální Debian obraz s neprivilegovaným uživatelem `toruser`.
+6. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá klientská síťová komunikace je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`).
+7. **SQLCipher šifrované lokální úložiště:** Lokální databáze SQLite je šifrována 256bitovým náhodným klíčem z hardwarového Keychainu s automatickými migracemi schématu (v1 a v2).
+8. **Zero Push Metadata Leak:** Periodický headless background sync bez FCM a APNs s garancí nepřekročení časového rozpočtu OS.
 
 ---
 
-## 2. Přehled Implementovaných Fází a Modulů
+## 2. Spuštění Backendové Infrastruktury (Docker Compose)
 
-### Fáze 1: Rust Zero-Knowledge Relay Server & Tester CLI (Dokončeno)
-- **`server/`:** Asynchronní HTTP a WebSocket server postavený na `axum` a `tokio`.
-  - `auth.rs`: Ed25519 detached challenge signing a SHA-256 mailbox hashing.
-  - `db.rs`: SQLite fronta zpráv s atomickým mazáním zprávy v transakci ihned po doručení.
-  - `worker.rs`: Pravidelný úklid expirovaných zpráv podle TTL (výchozí 14 dní).
-  - `handlers/`: `POST /api/v1/message` (Blind drop) a `GET /api/v1/stream` (WebSocket odběr).
-- **`tester-cli/`:** Automatizovaný testovací nástroj pro generování identit a spouštění E2E testů (`cargo run --bin tester-cli -- e2e-test`).
+### 1. Spuštění kontejnerů:
+```bash
+docker-compose up -d --build
+```
 
----
+### 2. Získání trvalé `.onion` adresy serveru:
+```bash
+docker-compose exec tor cat /var/lib/tor/hidden_service/hostname
+```
+*Výstup bude vaše Onion v3 adresa ve formátu `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion`.*
 
-### Fáze 2: Klientská Aplikace (React Native / TypeScript) (Dokončeno)
-- **Milník 2.1: Modul Identity (`client/src/identity/`):** `IdentityManager.ts` (BIP-39, Ed25519, Curve25519, Keychain).
-- **Milník 2.2: Tor Bridge & Síťový Klient (`client/src/network/`):** `Socks5Tunnel.ts`, `TorManager.ts`, `TorHttpClient.ts`, `TorWebSocketClient.ts`.
-- **Milník 2.3: E2EE Engine (`client/src/crypto/`):** `CryptoEngine.ts` (Double Ratchet + X3DH), `ISignalStore.ts`, `InMemorySignalStore.ts`.
-- **Milník 2.4: Lokální Šifrovaná Databáze (`client/src/storage/`):** `DatabaseManager.ts` (SQLCipher), `SqliteSignalStore.ts`, `ContactRepository.ts`, `MessageRepository.ts`.
-- **Milník 2.5: Výměna Klíčů a Orchestrace (`client/src/orchestration/`):** `ContactExchange.ts` (QR URI validace), `AppOrchestrator.ts`.
-- **Milník 2.6: UI/UX, Navigace a React State Management (`client/src/ui/`):** `theme.ts` (Cyber Dark Mode), `OrchestratorContext.tsx`, znovupoužitelné komponenty (`TorStatusBadge`, `MessageBubble`, `ContactListItem`...) a obrazovky (`Welcome`, `SeedDisplay`, `RestoreSeed`, `ChatList`, `Chat`, `Profile`, `Scanner`).
+### 3. Zobrazení logů:
+```bash
+# Logy backendu
+docker-compose logs -f backend
 
----
-
-### Fáze 3: Pokročilé Mobilní Funkce a Produkční Zabezpečení
-
-#### Milník 3.1: Background Sync & Local Notifications (`client/src/background/`, `client/src/notifications/`) (Dokončeno)
-- `NotificationManager.ts`: Správa nativních lokálních notifikací `@notifee/react-native` s vysokou prioritou, vibracemi a podporou `privacyMode`.
-- `BackgroundSyncService.ts`: Headless background synchronizační worker s přísným časovým limitem (max 25s) a `Promise.race()` timeoutem (20s) pro bezpečný Tor bootstrap.
-- `BackgroundSyncTask.ts`: Registrace headless úlohy pro `react-native-background-fetch`.
-
-#### Milník 3.2: Multi-Device Podpora & Párování Zařízení (`client/src/devices/`) (Dokončeno)
-- `DeviceLinkManager.ts`: Kryptografické párování Master (Mobil) a Slave (PC) přes efemérní klíče a QR kód bez úniku metadat na server.
-- `DatabaseManager.ts` (Migrace v2): Tabulka `own_linked_devices` a sloupec `linked_devices` v kontaktech.
-- `AppOrchestrator.ts`: Multi-Recipient distribuce zpráv všem zařízením příjemce a automatické odesílání Self-Sync zpráv vlastním sekundárním zařízením.
+# Logy Tor démona
+docker-compose logs -f tor
+```
 
 ---
 
 ## 3. Struktura Repozitáře
 
 ```
+├── docker-compose.yml           # Docker Compose orchestrace (Backend + Tor Sidecar)
+├── torrc                        # Konfigurace Tor skryté služby (Hidden Service)
 ├── server/                      # Rust Zero-Knowledge Relay Server (Axum, Tokio, SQLite)
+│   ├── Dockerfile               # Multi-stage produkční Dockerfile
+│   ├── Cargo.toml               # Konfigurace závislostí a binárky tore2ee-server
 │   ├── src/
 │   │   ├── auth.rs              # Ed25519 challenge-response a SHA-256 mailbox hashing
 │   │   ├── config.rs            # Načítání ENV konfigurace a parametrů
@@ -126,17 +124,15 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 │   │   ├── background/          # BackgroundSyncService, BackgroundSyncTask
 │   │   └── index.ts             # Centrální exportní bod klientské knihovny
 │   ├── jest.config.js           # Konfigurace testů Jest + ts-jest
-│   ├── package.json             # Klientské závislosti a skripty
+│   ├── package.json             # Klientská závislost a skripty
 │   └── tsconfig.json            # TypeScript konfigurace se striktní kontrolou
 ├── Cargo.toml                   # Cargo workspace konfigurace
-└── README.md                    # Dokumentace a architektura projektu
+└── README.md                    # Kompletní dokumentace a architektura projektu
 ```
 
 ---
 
-## 4. Spuštění a Verifikace
-
-### A. Klientská aplikace (React Native / TypeScript)
+## 4. Spuštění Testů Klientské Aplikace
 
 V adresáři `client/`:
 
@@ -145,46 +141,8 @@ V adresáři `client/`:
    cd client
    npm test
    ```
-   *Pokrývá: IdentityManager, SOCKS5 tunel, Tor HttpClient/WebSocket, Double Ratchet E2EE, SQLCipher persistenci v2, ContactExchange QR ověřování, AppOrchestrator, UI komponenty, NotificationManager, BackgroundSyncService, DeviceLinkManager a Multi-Device Self-Sync.*
 
 2. **Striktní kontrola typů TypeScriptu:**
    ```bash
    npm run typecheck
    ```
-
----
-
-### B. Backend Relay Server a Tester CLI (Rust)
-
-1. **Spuštění jednotkových testů Rust serveru:**
-   ```bash
-   cargo test --workspace
-   ```
-
-2. **Spuštění Relay Serveru:**
-   ```bash
-   cargo run --bin server
-   ```
-   *Výchozí konfigurace: `127.0.0.1:8080` s in-memory SQLite.*
-
-3. **Spuštění automatizovaného E2E testu v Rustu:**
-   ```bash
-   cargo run --bin tester-cli -- e2e-test
-   ```
-
----
-
-## 5. Konfigurace Tor Onion Hidden Service
-
-Pro nasazení serveru do živé sítě Tor přidejte do souboru `/etc/tor/torrc`:
-
-```torrc
-HiddenServiceDir /var/lib/tor/tore2ee_service/
-HiddenServicePort 80 127.0.0.1:8080
-HiddenServiceVersion 3
-```
-
-Po restartu Tor démona (`systemctl restart tor`) získáte svou `.onion` adresu v souboru `/var/lib/tor/tore2ee_service/hostname`.
-Klienti se připojují výhradně přes tuto adresu:
-- **WebSocket stream:** `ws://<VASE_ADRESA>.onion/api/v1/stream`
-- **HTTP POST:** `http://<VASE_ADRESA>.onion/api/v1/message`

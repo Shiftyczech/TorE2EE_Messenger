@@ -1,0 +1,6 @@
+Log notice stdout
+SocksPort 0
+HiddenServiceDir /var/lib/tor/hidden_service/
+# Směruje vnější port 80 (Onion) na interní Docker službu "backend" na portu 3000
+HiddenServicePort 80 backend:3000
+
