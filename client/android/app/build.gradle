@@ -2,13 +2,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-react {
-    /* Folders */
-    // root = file("../..")
-    // reactNativeDir = file("../../node_modules/react-native")
-    // jsRootDir = file("../../src")
-}
-
 def enableProguardInReleaseBuilds = false
 
 android {
@@ -52,7 +45,7 @@ android {
         release {
             signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 }
@@ -60,4 +53,3 @@ android {
 dependencies {
     implementation("com.facebook.react:react-android")
 }
-

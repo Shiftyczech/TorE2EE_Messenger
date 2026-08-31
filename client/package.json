@@ -10,6 +10,7 @@
     "@noble/hashes": "^1.4.0",
     "bip39": "^3.1.0",
     "react": "^18.3.1",
+    "react-native": "^0.87.1",
     "react-native-keychain": "^8.2.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
