@@ -1,6 +1,6 @@
 # TorE2EE Messenger
 
-Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu**.
+Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Multi-Device podporou (Linked Devices & Self-Sync Messages)**, **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu**.
 
 ---
 
@@ -17,9 +17,9 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
  │  └─────────────────────────┘   └────────────┬─────────────┘   └───────────┬────────────┘ │
  │                                             │                             │              │
  │  ┌─────────────────────────┐   ┌────────────▼─────────────┐   ┌───────────▼────────────┐ │
- │  │  Background Sync Task   │   │      SQLCipher Store     │   │   Local Notifications  │ │
- │  │ (Headless 25s, No FCM,  │◄─►│  (Encrypted DB, Messages,│◄─►│  (@notifee, Priority,  │ │
- │  │  Periodic Wakeup ~15m)  │   │   Contacts, SignalStore) │   │   Privacy Lockscreen)  │ │
+ │  │  Background Sync Task   │   │      SQLCipher Store     │   │   Device Link Manager  │ │
+ │  │ (Headless 25s, No FCM,  │◄─►│  (Encrypted DB v2,       │◄─►│  (Master-Slave QR,     │ │
+ │  │  Periodic Wakeup ~15m)  │   │   Contacts, LinkedDevs)  │   │   Self-Sync Envelopes) │ │
  │  └─────────────────────────┘   └────────────┬─────────────┘   └────────────────────────┘ │
  │                                             │                                            │
  │                                ┌────────────▼─────────────┐                              │
@@ -48,16 +48,18 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 
 ### Hlavní bezpečnostní pilíře:
 1. **Identita bez účtů:** Žádná telefonní čísla, e-maily ani centrální účty. Identita je deterministicky odvozena z **12/24slovního BIP-39 seedu** do **Ed25519** (pro podpis challenge a identifikaci mailboxu) a **Curve25519** (pro E2EE šifrování).
-2. **Zero-Knowledge Backend:** Rust server nezná obsah zpráv, odesílatele ani identitu uživatelů. Zná pouze 64znakový SHA-256 hash veřejného klíče příjemce (`recipient_pubkey_hash`) a neprůhledný šifrovaný payload.
+2. **Zero-Knowledge Backend:** Rust server nezná obsah zpráv, odesílatele ani identitu uživatelů. Zná pouze 64znakový SHA-256 hash veřejného klíče schránky (`recipient_pubkey_hash`) a neprůhledný šifrovaný payload.
 3. **End-to-End Šifrování (Signal Protocol / Double Ratchet + X3DH):**
-   - **X3DH Asynchronní dohoda klíčů:** Každý uživatel publikuje Signed PreKey a dávku jednorázových One-Time PreKeys.
+   - **X3DH Asynchronní dohoda klíčů:** Každé zařízení publikuje svůj Signed PreKey a jednorázové One-Time PreKeys.
    - **Double Ratchet:** Asymetrický DH ratchet s Curve25519 efemérními klíči při každé odpovědi (Break-in Recovery) kombinovaný se symetrickým KDF ratchetem pro každou zprávu (Forward Secrecy).
    - **AEAD šifrování:** `tweetnacl.secretbox` (XSalsa20-Poly1305) s okamžitým nulováním klíčů v paměti (`fill(0)`).
-   - **Out-of-Order Handling:** Bezpečné ukládání přeskočených klíčů pro zprávy doručené mimo pořadí.
-4. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá síťová komunikace (HTTP POST pro odesílání i WebSocket pro příjem) je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`).
-5. **SQLCipher šifrované lokální úložiště:** Lokální databáze SQLite je šifrována 256bitovým náhodným klíčem uloženým výhradně v hardwarovém `react-native-keychain`. Databáze neběží v prostém textu a veškeré dotazy jsou striktně parametrizované (`?`).
-6. **Zero Push Metadata Leak (Background Sync bez FCM/APNs):** Synchronizace na pozadí probíhá periodickým headless probouzením bez centrálních push notifikací Google FCM nebo Apple APNs.
-7. **Out-of-Band výměna kontaktů:** Kompaktní QR kód / URI (`tore2ee://contact?v=1&d=...`) s kryptografickou validací Ed25519 podpisu Signed PreKey.
+4. **Multi-Device podpora (Linked Devices & Self-Sync):**
+   - **Párování Master $\leftrightarrow$ Slave:** Sekundární zařízení (PC) vygeneruje efemérní Curve25519 klíč a dočasnou schránku v QR kódu. Mobil (Master) zašifruje provizní balíček a odešle jej přes Tor.
+   - **Multi-Recipient Fanout:** Při odeslání zprávy zašifruje odesílatel zprávu samostatně pro všechna propojená zařízení příjemce.
+   - **Self-Sync zprávy:** Odesílatel zašifruje kopii zprávy i pro svá vlastní sekundární zařízení (PC / Tablet), která ji uloží jako odeslanou (`isOutgoing = true`).
+5. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá síťová komunikace (HTTP POST pro odesílání i WebSocket pro příjem) je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`).
+6. **SQLCipher šifrované lokální úložiště:** Lokální databáze SQLite je šifrována 256bitovým náhodným klíčem z hardwarového Keychainu s automatickými migracemi schématu (v1 a v2).
+7. **Zero Push Metadata Leak:** Periodický headless background sync bez FCM a APNs s garancí nepřekročení časového rozpočtu OS.
 
 ---
 
@@ -87,8 +89,13 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 
 #### Milník 3.1: Background Sync & Local Notifications (`client/src/background/`, `client/src/notifications/`) (Dokončeno)
 - `NotificationManager.ts`: Správa nativních lokálních notifikací `@notifee/react-native` s vysokou prioritou, vibracemi a podporou `privacyMode`.
-- `BackgroundSyncService.ts`: Headless background synchronizační worker s přísným časovým limitem (max 25s) a `Promise.race()` timeoutem (20s) pro bezpečný Tor bootstrap a okamžité dešifrování zpráv bez zablokování UI.
+- `BackgroundSyncService.ts`: Headless background synchronizační worker s přísným časovým limitem (max 25s) a `Promise.race()` timeoutem (20s) pro bezpečný Tor bootstrap.
 - `BackgroundSyncTask.ts`: Registrace headless úlohy pro `react-native-background-fetch`.
+
+#### Milník 3.2: Multi-Device Podpora & Párování Zařízení (`client/src/devices/`) (Dokončeno)
+- `DeviceLinkManager.ts`: Kryptografické párování Master (Mobil) a Slave (PC) přes efemérní klíče a QR kód bez úniku metadat na server.
+- `DatabaseManager.ts` (Migrace v2): Tabulka `own_linked_devices` a sloupec `linked_devices` v kontaktech.
+- `AppOrchestrator.ts`: Multi-Recipient distribuce zpráv všem zařízením příjemce a automatické odesílání Self-Sync zpráv vlastním sekundárním zařízením.
 
 ---
 
@@ -111,8 +118,9 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 │   │   ├── identity/            # Správa identity (BIP-39, Ed25519, Curve25519, Keychain)
 │   │   ├── network/             # SOCKS5 tunel, TorManager, TorHttpClient, TorWebSocketClient
 │   │   ├── crypto/              # Signal Protocol (Double Ratchet + X3DH), ISignalStore
-│   │   ├── storage/             # SQLCipher DatabaseManager, SqliteSignalStore, Repozitáře
-│   │   ├── orchestration/       # ContactExchange (QR URI), AppOrchestrator
+│   │   ├── storage/             # SQLCipher DatabaseManager v2, SqliteSignalStore, Repozitáře
+│   │   ├── orchestration/       # ContactExchange (QR URI), AppOrchestrator (Multi-Device dispatch)
+│   │   ├── devices/             # DeviceLinkManager (Master-Slave pairing, Self-Sync)
 │   │   ├── ui/                  # UI Theme, Context, Komponenty, Obrazovky a RootNavigator
 │   │   ├── notifications/       # NotificationManager (@notifee lokální notifikace)
 │   │   ├── background/          # BackgroundSyncService, BackgroundSyncTask
@@ -132,12 +140,12 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 
 V adresáři `client/`:
 
-1. **Spuštění všech testovacích sad (39 unit a integračních testů):**
+1. **Spuštění všech testovacích sad (42 unit a integračních testů napříč 12 sadami):**
    ```bash
    cd client
    npm test
    ```
-   *Pokrývá: IdentityManager, SOCKS5 tunel, Tor HttpClient/WebSocket, Double Ratchet E2EE, SQLCipher persistenci, ContactExchange QR ověřování, AppOrchestrator, UI komponenty, NotificationManager a BackgroundSyncService.*
+   *Pokrývá: IdentityManager, SOCKS5 tunel, Tor HttpClient/WebSocket, Double Ratchet E2EE, SQLCipher persistenci v2, ContactExchange QR ověřování, AppOrchestrator, UI komponenty, NotificationManager, BackgroundSyncService, DeviceLinkManager a Multi-Device Self-Sync.*
 
 2. **Striktní kontrola typů TypeScriptu:**
    ```bash

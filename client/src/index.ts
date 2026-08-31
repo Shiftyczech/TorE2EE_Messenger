@@ -46,3 +46,6 @@ export * from './notifications/NotificationManager';
 export * from './background/types';
 export * from './background/BackgroundSyncService';
 export * from './background/BackgroundSyncTask';
+
+export * from './devices/types';
+export * from './devices/DeviceLinkManager';

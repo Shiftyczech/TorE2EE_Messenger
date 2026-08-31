@@ -128,6 +128,7 @@ export class CryptoEngine {
       skippedMessageKeys: {},
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      oneTimePreKeyId: bundle.oneTimePreKey?.keyId,
     };
 
     await this.store.saveSession(recipientIdentityKeyHex, session);
@@ -176,6 +177,13 @@ export class CryptoEngine {
 
     messageKey.fill(0);
 
+    const otkIdToSend =
+      initialBundleContext?.oneTimePreKeyId !== undefined
+        ? initialBundleContext.oneTimePreKeyId
+        : seqNum === 0
+        ? session.oneTimePreKeyId
+        : undefined;
+
     await this.store.saveSession(recipientIdentityKeyHex, session);
 
     const identity = await this.store.getIdentity();
@@ -186,7 +194,7 @@ export class CryptoEngine {
       previousChainLength: session.previousChainLength,
       ciphertext: Buffer.from(ciphertextBytes).toString('base64'),
       nonce: bytesToHex(nonceBytes),
-      oneTimePreKeyId: initialBundleContext?.oneTimePreKeyId,
+      oneTimePreKeyId: otkIdToSend,
       initialIdentityKeyHex: identity.encryptionKey.publicKeyHex,
       initialEphemeralKeyHex: session.localDhKeyPair.publicKeyHex,
     };
@@ -413,4 +421,3 @@ export class CryptoEngine {
     return result;
   }
 }
-

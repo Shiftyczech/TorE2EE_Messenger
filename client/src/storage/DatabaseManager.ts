@@ -44,13 +44,12 @@ export class BetterSqliteDriver implements IDatabaseDriver {
 
 export class DatabaseManager {
   private driver: IDatabaseDriver | null = null;
-  private config: DatabaseConfig;
+  private config: DatabaseConfig & { encryptionKey?: string };
   private isInitialized: boolean = false;
 
   constructor(config: DatabaseConfig = {}) {
     this.config = {
       name: config.name || 'tore2ee_vault.db',
-      encryptionKey: config.encryptionKey,
       isMemory: config.isMemory ?? false,
     };
   }
@@ -107,7 +106,6 @@ export class DatabaseManager {
       const db = new Database(':memory:');
       this.driver = new BetterSqliteDriver(db);
     } else {
-      // Try better-sqlite3 or native SQLCipher driver
       try {
         const Database = require('better-sqlite3');
         const db = new Database(this.config.name);
@@ -120,7 +118,6 @@ export class DatabaseManager {
         }
         this.driver = new BetterSqliteDriver(db);
       } catch {
-        // In React Native environment, quick-sqlite / op-sqlite will be bound here
         throw new Error('SQLite driver initialization failed');
       }
     }
@@ -170,6 +167,9 @@ export class DatabaseManager {
 
     if (currentVersion < 1) {
       await this.applyMigrationV1();
+    }
+    if (currentVersion < 2) {
+      await this.applyMigrationV2();
     }
   }
 
@@ -239,6 +239,35 @@ export class DatabaseManager {
     );
   }
 
+  private async applyMigrationV2(): Promise<void> {
+    if (!this.driver) return;
+
+    // 1. Add linked_devices column to contacts table
+    try {
+      await this.driver.execute(`
+        ALTER TABLE contacts ADD COLUMN linked_devices TEXT DEFAULT '[]';
+      `);
+    } catch {
+      // Column may already exist
+    }
+
+    // 2. Create own_linked_devices table
+    await this.driver.execute(`
+      CREATE TABLE IF NOT EXISTS own_linked_devices (
+        device_id INTEGER PRIMARY KEY,
+        device_name TEXT NOT NULL,
+        recipient_pubkey_hash TEXT NOT NULL,
+        identity_pubkey_hex TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+
+    await this.driver.execute(
+      'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?);',
+      [2, Date.now()]
+    );
+  }
+
   public async close(): Promise<void> {
     if (this.driver) {
       await this.driver.close();
@@ -247,4 +276,3 @@ export class DatabaseManager {
     }
   }
 }
-

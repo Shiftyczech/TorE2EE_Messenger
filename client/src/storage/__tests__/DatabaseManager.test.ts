@@ -19,11 +19,11 @@ describe('DatabaseManager & Repositories', () => {
   });
 
   describe('Database Initialization & Migrations', () => {
-    it('creates tables and schema migrations table v1', async () => {
+    it('creates tables and schema migrations up to version 2', async () => {
       const migrationRow = await db.queryOne<{ version: number }>(
         'SELECT MAX(version) as version FROM schema_migrations;'
       );
-      expect(migrationRow?.version).toBe(1);
+      expect(migrationRow?.version).toBe(2);
 
       // Verify tables exist
       const tables = await db.query<{ name: string }>(
@@ -35,6 +35,7 @@ describe('DatabaseManager & Repositories', () => {
       expect(tableNames).toContain('signed_prekeys');
       expect(tableNames).toContain('one_time_prekeys');
       expect(tableNames).toContain('messages');
+      expect(tableNames).toContain('own_linked_devices');
     });
 
     it('generates a 256-bit encryption key when requested', async () => {
@@ -45,13 +46,22 @@ describe('DatabaseManager & Repositories', () => {
   });
 
   describe('ContactRepository', () => {
-    it('saves, retrieves, updates alias and deletes contacts', async () => {
+    it('saves, retrieves, updates alias and deletes contacts with multi-device support', async () => {
       const contact = {
         recipientPubkeyHash: '11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff',
         identityPubkeyHex: 'aabbccddeeff11223344556677889900aabbccddeeff11223344556677889900',
         signingPubkeyHex: 'ddeeff11223344556677889900aabbccddeeff11223344556677889900aabbcc',
         alias: 'Alice',
         createdAt: 1234567890,
+        linkedDevices: [
+          {
+            deviceId: 1,
+            recipientPubkeyHash: '11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff',
+            identityPubkeyHex: 'aabbccddeeff11223344556677889900aabbccddeeff11223344556677889900',
+            deviceName: 'Alice Phone',
+            createdAt: 1234567890,
+          },
+        ],
       };
 
       await contactRepo.saveContact(contact);
@@ -59,6 +69,7 @@ describe('DatabaseManager & Repositories', () => {
       const byHash = await contactRepo.getContactByHash(contact.recipientPubkeyHash);
       expect(byHash).not.toBeNull();
       expect(byHash?.alias).toBe('Alice');
+      expect(byHash?.linkedDevices).toHaveLength(1);
 
       const byIdKey = await contactRepo.getContactByIdentityKey(contact.identityPubkeyHex);
       expect(byIdKey).not.toBeNull();
@@ -67,6 +78,34 @@ describe('DatabaseManager & Repositories', () => {
       await contactRepo.updateAlias(contact.recipientPubkeyHash, 'Alice Secure');
       const updated = await contactRepo.getContactByHash(contact.recipientPubkeyHash);
       expect(updated?.alias).toBe('Alice Secure');
+
+      // Test adding a secondary linked device
+      await contactRepo.addLinkedDevice(contact.recipientPubkeyHash, {
+        deviceId: 2,
+        recipientPubkeyHash: '223344556677889900aabbccddeeff11223344556677889900aabbccddeeff11',
+        identityPubkeyHex: 'bbccddeeff11223344556677889900aabbccddeeff11223344556677889900aa',
+        deviceName: 'Alice Laptop',
+        createdAt: 1234567899,
+      });
+
+      const devices = await contactRepo.getLinkedDevices(contact.recipientPubkeyHash);
+      expect(devices).toHaveLength(2);
+
+      // Test own linked devices
+      await contactRepo.saveOwnLinkedDevice({
+        deviceId: 2,
+        deviceName: 'My Desktop',
+        recipientPubkeyHash: 'my_pc_hash',
+        identityPubkeyHex: 'my_pc_key',
+        createdAt: 1000,
+      });
+
+      const ownDevices = await contactRepo.listOwnLinkedDevices();
+      expect(ownDevices).toHaveLength(1);
+      expect(ownDevices[0].deviceName).toBe('My Desktop');
+
+      await contactRepo.deleteOwnLinkedDevice(2);
+      expect(await contactRepo.listOwnLinkedDevices()).toHaveLength(0);
 
       const list = await contactRepo.listContacts();
       expect(list).toHaveLength(1);
@@ -132,4 +171,3 @@ describe('DatabaseManager & Repositories', () => {
     });
   });
 });
-

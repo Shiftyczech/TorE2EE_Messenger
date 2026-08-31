@@ -50,5 +50,5 @@ export interface SessionRecord {
   skippedMessageKeys: Record<string, string>;
   createdAt: number;
   updatedAt: number;
+  oneTimePreKeyId?: number;
 }
-

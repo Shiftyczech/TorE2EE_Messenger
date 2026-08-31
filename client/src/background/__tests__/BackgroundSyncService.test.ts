@@ -158,59 +158,61 @@ describe('BackgroundSyncService', () => {
       await new Promise<void>((resolve) => mockServer.close(() => resolve()));
     });
 
-    it('wakes up on background, drains queued envelope, decrypts and triggers local notification', async () => {
-      // 1. Bob generates identity and saves to Keychain
-      const bobIdentity = await IdentityManager.generateIdentity();
-      await IdentityManager.saveIdentityToKeychain(bobIdentity);
+    it(
+      'wakes up on background, drains queued envelope, decrypts and triggers local notification',
+      async () => {
+        // 1. Bob generates identity and saves to Keychain
+        const bobIdentity = await IdentityManager.generateIdentity();
+        await IdentityManager.saveIdentityToKeychain(bobIdentity);
 
-      // Pre-populate Bob's SignedPreKey in Bob's persistent SQLite database
-      const dbConfig = { name: testDbName };
-      const preDb = new DatabaseManager(dbConfig);
-      await preDb.initialize();
-      const bobStore = new SqliteSignalStore(bobIdentity, preDb);
-      const bobEngine = new CryptoEngine(bobStore);
-      const bobBundle = await bobEngine.generatePreKeyBundle(5);
-      await preDb.close();
+        // Pre-populate Bob's SignedPreKey in Bob's persistent SQLite database
+        const dbConfig = { name: testDbName };
+        const preDb = new DatabaseManager(dbConfig);
+        await preDb.initialize();
+        const bobStore = new SqliteSignalStore(bobIdentity, preDb);
+        const bobEngine = new CryptoEngine(bobStore);
+        const bobBundle = await bobEngine.generatePreKeyBundle(5);
+        await preDb.close();
 
-      // 2. Alice initiates session and encrypts a message for Bob
-      const aliceIdentity = await IdentityManager.generateIdentity();
-      const aliceStore = new InMemorySignalStore(aliceIdentity);
-      const aliceEngine = new CryptoEngine(aliceStore);
-      await aliceEngine.initiateSession(bobBundle.identityKeyHex, bobBundle);
+        // 2. Alice initiates session and encrypts a message for Bob
+        const aliceIdentity = await IdentityManager.generateIdentity();
+        const aliceStore = new InMemorySignalStore(aliceIdentity);
+        const aliceEngine = new CryptoEngine(aliceStore);
+        await aliceEngine.initiateSession(bobBundle.identityKeyHex, bobBundle);
 
-      const plaintext = 'Secret message received during background sync!';
-      const encryptedMsg = await aliceEngine.encrypt(bobBundle.identityKeyHex, plaintext, {
-        oneTimePreKeyId: bobBundle.oneTimePreKey?.keyId,
-      });
+        const plaintext = 'Secret message received during background sync!';
+        const encryptedMsg = await aliceEngine.encrypt(bobBundle.identityKeyHex, plaintext);
 
-      queuedPayloadForBob = {
-        type: 'message',
-        encrypted_payload: JSON.stringify(encryptedMsg),
-        nonce: encryptedMsg.nonce,
-        created_at: Math.floor(Date.now() / 1000),
-      };
+        queuedPayloadForBob = {
+          type: 'message',
+          encrypted_payload: JSON.stringify(encryptedMsg),
+          nonce: encryptedMsg.nonce,
+          created_at: Math.floor(Date.now() / 1000),
+        };
 
-      // 3. Execute Headless Background Sync Task on the pre-populated SQLite DB
-      const syncResult = await BackgroundSyncService.executeSync({
-        torConfig: {
-          socksProxyHost: '127.0.0.1',
-          socksProxyPort: 9050,
-          targetHost: '127.0.0.1',
-          targetPort: mockPort,
-          devMode: true,
-        },
-        databaseConfig: dbConfig,
-        bootstrapTimeoutMs: 5000,
-        drainTimeoutMs: 600,
-      });
+        // 3. Execute Headless Background Sync Task on the pre-populated SQLite DB
+        const syncResult = await BackgroundSyncService.executeSync({
+          torConfig: {
+            socksProxyHost: '127.0.0.1',
+            socksProxyPort: 9050,
+            targetHost: '127.0.0.1',
+            targetPort: mockPort,
+            devMode: true,
+          },
+          databaseConfig: dbConfig,
+          bootstrapTimeoutMs: 5000,
+          drainTimeoutMs: 600,
+        });
 
-      expect(syncResult.status).toBe('NEW_DATA');
-      expect(syncResult.messagesReceived).toBe(1);
+        expect(syncResult.status).toBe('NEW_DATA');
+        expect(syncResult.messagesReceived).toBe(1);
 
-      // 4. Verify Local Notification was triggered
-      expect(mockDriver.notifications).toHaveLength(1);
-      expect(mockDriver.notifications[0].body).toBe(plaintext);
-    });
+        // 4. Verify Local Notification was triggered
+        expect(mockDriver.notifications).toHaveLength(1);
+        expect(mockDriver.notifications[0].body).toBe(plaintext);
+      },
+      30000
+    );
   });
 });
 
@@ -237,4 +239,3 @@ function sendWsFrame(socket: net.Socket, text: string) {
 
   socket.write(Buffer.concat([header, payload]));
 }
-

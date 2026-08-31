@@ -2,6 +2,7 @@ import nacl from 'tweetnacl';
 import { bytesToHex } from '@noble/hashes/utils';
 import { CryptoEngine } from '../crypto/CryptoEngine';
 import { EncryptedMessage, PreKeyBundle } from '../crypto/types';
+import { DeviceSyncPayload } from '../devices/types';
 import { UserIdentity } from '../identity/types';
 import { TorHttpClient } from '../network/TorHttpClient';
 import { TorManager } from '../network/TorManager';
@@ -16,7 +17,7 @@ import { ContactRepository } from '../storage/ContactRepository';
 import { DatabaseManager } from '../storage/DatabaseManager';
 import { MessageRepository } from '../storage/MessageRepository';
 import { SqliteSignalStore } from '../storage/SqliteSignalStore';
-import { ContactRecord, StoredMessage } from '../storage/types';
+import { ContactRecord, DeviceRecord, StoredMessage } from '../storage/types';
 import { AppOrchestratorConfig, OrchestratorEvents } from './types';
 
 export class AppOrchestrator {
@@ -133,6 +134,10 @@ export class AppOrchestrator {
     return this.dbManager;
   }
 
+  public getHttpClient(): TorHttpClient {
+    return this.httpClient;
+  }
+
   /**
    * Generates a PreKeyBundle for sharing via QR code or manual contact adding.
    */
@@ -141,7 +146,8 @@ export class AppOrchestrator {
   }
 
   /**
-   * Encrypts, persists, and transmits an outbound message to a contact.
+   * Encrypts, persists, and transmits an outbound message across all linked recipient devices
+   * and dispatches self-sync messages to all own linked secondary devices.
    */
   public async sendOutboundMessage(
     contactPubkeyHash: string,
@@ -152,24 +158,87 @@ export class AppOrchestrator {
       throw new Error(`Contact not found for hash: ${contactPubkeyHash}`);
     }
 
-    // 1. Double Ratchet Encrypt
-    const encryptedMsg = await this.cryptoEngine.encrypt(
-      contact.identityPubkeyHex,
-      plaintext
-    );
-
-    // 2. Persist in local SQLite database
     const messageId = bytesToHex(nacl.randomBytes(16));
+    const now = Date.now();
+
+    // 1. Determine all recipient devices (multi-device support)
+    const targetDevices: DeviceRecord[] =
+      contact.linkedDevices && contact.linkedDevices.length > 0
+        ? contact.linkedDevices
+        : [
+            {
+              deviceId: 1,
+              recipientPubkeyHash: contact.recipientPubkeyHash,
+              identityPubkeyHex: contact.identityPubkeyHex,
+              createdAt: contact.createdAt,
+            },
+          ];
+
+    // 2. Encrypt and dispatch envelopes to each recipient device
+    let deliveredAtLeastOnce = false;
+    for (const device of targetDevices) {
+      try {
+        const encryptedMsg = await this.cryptoEngine.encrypt(
+          device.identityPubkeyHex,
+          plaintext
+        );
+
+        const envelope: OutgoingMessageEnvelope = {
+          recipient_pubkey_hash: device.recipientPubkeyHash,
+          encrypted_payload: JSON.stringify(encryptedMsg),
+          nonce: encryptedMsg.nonce,
+        };
+
+        const resp = await this.httpClient.sendMessage(envelope);
+        if (resp.delivered_live) {
+          deliveredAtLeastOnce = true;
+        }
+      } catch {
+        // Continue delivering to remaining devices if one fails
+      }
+    }
+
+    // 3. Dispatch Self-Sync messages to all own linked devices (e.g. PC / Tablet)
+    const ownDevices = await this.contactRepo.listOwnLinkedDevices();
+    for (const ownDev of ownDevices) {
+      try {
+        const syncPayload: DeviceSyncPayload = {
+          isSyncMessage: true,
+          originalRecipientHash: contact.recipientPubkeyHash,
+          body: plaintext,
+          timestamp: now,
+          messageId,
+        };
+
+        const encSyncMsg = await this.cryptoEngine.encrypt(
+          ownDev.identityPubkeyHex,
+          JSON.stringify(syncPayload)
+        );
+
+        const syncEnvelope: OutgoingMessageEnvelope = {
+          recipient_pubkey_hash: ownDev.recipientPubkeyHash,
+          encrypted_payload: JSON.stringify(encSyncMsg),
+          nonce: encSyncMsg.nonce,
+        };
+
+        await this.httpClient.sendMessage(syncEnvelope);
+      } catch {
+        // Ignore self-sync delivery error
+      }
+    }
+
+    // 4. Persist in local SQLite database
+    const deliveryStatus = deliveredAtLeastOnce ? 'delivered' : 'sent';
     const storedMsg: StoredMessage = {
       id: messageId,
       contactPubkeyHash: contact.recipientPubkeyHash,
       senderIdentityHex: this.identity.encryptionKey.publicKeyHex,
       recipientIdentityHex: contact.identityPubkeyHex,
       body: plaintext,
-      timestamp: Date.now(),
+      timestamp: now,
       isOutgoing: true,
       isRead: true,
-      deliveryStatus: 'pending',
+      deliveryStatus,
     };
 
     await this.messageRepo.saveMessage(storedMsg);
@@ -177,36 +246,12 @@ export class AppOrchestrator {
       this.events.onMessageSent(storedMsg);
     }
 
-    // 3. Send envelope over Tor HTTP client
-    try {
-      const envelope: OutgoingMessageEnvelope = {
-        recipient_pubkey_hash: contact.recipientPubkeyHash,
-        encrypted_payload: JSON.stringify(encryptedMsg),
-        nonce: encryptedMsg.nonce,
-      };
-
-      const resp = await this.httpClient.sendMessage(envelope);
-      const newStatus = resp.delivered_live ? 'delivered' : 'sent';
-      storedMsg.deliveryStatus = newStatus;
-
-      await this.messageRepo.updateDeliveryStatus(messageId, newStatus);
-      if (this.events.onMessageStatusChanged) {
-        this.events.onMessageStatusChanged(messageId, newStatus);
-      }
-    } catch (err) {
-      await this.messageRepo.updateDeliveryStatus(messageId, 'failed');
-      storedMsg.deliveryStatus = 'failed';
-      if (this.events.onMessageStatusChanged) {
-        this.events.onMessageStatusChanged(messageId, 'failed');
-      }
-      throw err;
-    }
-
     return storedMsg;
   }
 
   /**
    * Processes an incoming encrypted envelope received over the WebSocket stream.
+   * Handles both normal contact messages and Self-Sync messages from own linked devices.
    */
   public async handleIncomingMessage(
     payload: IncomingMessagePayload
@@ -223,9 +268,8 @@ export class AppOrchestrator {
         contact = await this.contactRepo.getContactByIdentityKey(senderIdentityHex);
 
         if (!contact) {
-          // Contact not yet in address book, create auto-contact record
           contact = {
-            recipientPubkeyHash: senderIdentityHex, // temporary placeholder
+            recipientPubkeyHash: senderIdentityHex,
             identityPubkeyHex: senderIdentityHex,
             signingPubkeyHex: '',
             alias: 'Unknown Contact',
@@ -251,30 +295,67 @@ export class AppOrchestrator {
       }
 
       // 2. Decrypt Plaintext via CryptoEngine
-      const plaintext = await this.cryptoEngine.decrypt(
+      const rawDecrypted = await this.cryptoEngine.decrypt(
         senderIdentityHex,
         encryptedMsg
       );
 
-      // 3. Store decrypted message in SQLite
-      const messageId = bytesToHex(nacl.randomBytes(16));
+      // 3. Check for Self-Sync Message
+      let isSync = false;
+      let messageBody = rawDecrypted;
+      let targetContactHash = contact.recipientPubkeyHash;
+      let messageId = bytesToHex(nacl.randomBytes(16));
+
+      try {
+        const parsedSync: DeviceSyncPayload = JSON.parse(rawDecrypted);
+        if (parsedSync.isSyncMessage) {
+          isSync = true;
+          messageBody = parsedSync.body;
+          targetContactHash = parsedSync.originalRecipientHash;
+          if (parsedSync.messageId) messageId = parsedSync.messageId;
+
+          // Ensure conversation contact exists on secondary device
+          let targetContact = await this.contactRepo.getContactByHash(targetContactHash);
+          if (!targetContact) {
+            targetContact = {
+              recipientPubkeyHash: targetContactHash,
+              identityPubkeyHex: targetContactHash,
+              signingPubkeyHex: '',
+              alias: 'Synced Conversation',
+              createdAt: Date.now(),
+            };
+            await this.contactRepo.saveContact(targetContact);
+          }
+        }
+      } catch {
+        // Regular plaintext message
+      }
+
+      // 4. Store message in SQLite
       const storedMsg: StoredMessage = {
         id: messageId,
-        contactPubkeyHash: contact.recipientPubkeyHash,
+        contactPubkeyHash: targetContactHash,
         senderIdentityHex: senderIdentityHex,
         recipientIdentityHex: this.identity.encryptionKey.publicKeyHex,
-        body: plaintext,
+        body: messageBody,
         timestamp: payload.created_at ? payload.created_at * 1000 : Date.now(),
-        isOutgoing: false,
-        isRead: false,
+        isOutgoing: isSync,
+        isRead: isSync,
         deliveryStatus: 'delivered',
+        isSyncMessage: isSync,
       };
 
       await this.messageRepo.saveMessage(storedMsg);
 
-      // 4. Emit event for reactive UI
-      if (this.events.onMessageReceived) {
-        this.events.onMessageReceived(storedMsg);
+      // 5. Emit event for reactive UI
+      if (isSync) {
+        if (this.events.onMessageSent) {
+          this.events.onMessageSent(storedMsg);
+        }
+      } else {
+        if (this.events.onMessageReceived) {
+          this.events.onMessageReceived(storedMsg);
+        }
       }
 
       return storedMsg;
@@ -286,4 +367,3 @@ export class AppOrchestrator {
     }
   }
 }
-
