@@ -29,16 +29,10 @@ const SOCKS5_REPLY_MESSAGES: Record<number, string> = {
 };
 
 export class Socks5Tunnel {
-  /**
-   * Generates the initial SOCKS5 greeting / auth negotiation packet (No Authentication).
-   */
   public static buildAuthRequest(): Uint8Array {
     return new Uint8Array([SOCKS_VERSION, 0x01, AUTH_NONE]);
   }
 
-  /**
-   * Verifies the SOCKS5 server auth negotiation response.
-   */
   public static verifyAuthResponse(data: Uint8Array): void {
     if (data.length < 2) {
       throw new Socks5Error('Invalid SOCKS5 auth response length');
@@ -51,10 +45,6 @@ export class Socks5Tunnel {
     }
   }
 
-  /**
-   * Builds a SOCKS5 CONNECT command for a target host and port.
-   * Uses domain-name addressing (ATYP 0x03) for .onion addresses to prevent DNS leaks.
-   */
   public static buildConnectRequest(host: string, port: number): Uint8Array {
     const isIpv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
 
@@ -73,7 +63,6 @@ export class Socks5Tunnel {
       packet[9] = port & 0xff;
       return packet;
     } else {
-      // Domain name (e.g. Onion address)
       const domainBytes = new TextEncoder().encode(host);
       const packet = new Uint8Array(7 + domainBytes.length);
       packet[0] = SOCKS_VERSION;
@@ -88,9 +77,6 @@ export class Socks5Tunnel {
     }
   }
 
-  /**
-   * Verifies the SOCKS5 CONNECT reply from the Tor proxy.
-   */
   public static verifyConnectResponse(data: Uint8Array): void {
     if (data.length < 4) {
       throw new Socks5Error('Invalid SOCKS5 connect response length');
@@ -105,9 +91,6 @@ export class Socks5Tunnel {
     }
   }
 
-  /**
-   * Establishes a raw TCP socket connection tunneled through the SOCKS5 proxy to targetHost:targetPort.
-   */
   public static connectViaSocks5(
     proxyHost: string,
     proxyPort: number,

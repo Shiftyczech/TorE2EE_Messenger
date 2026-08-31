@@ -14,17 +14,14 @@ describe('Tor Network Modules', () => {
       const authReq = Socks5Tunnel.buildAuthRequest();
       expect(Array.from(authReq)).toEqual([0x05, 0x01, 0x00]);
 
-      // Valid response: version 5, no auth
       expect(() =>
         Socks5Tunnel.verifyAuthResponse(new Uint8Array([0x05, 0x00]))
       ).not.toThrow();
 
-      // Invalid version
       expect(() =>
         Socks5Tunnel.verifyAuthResponse(new Uint8Array([0x04, 0x00]))
       ).toThrow(Socks5Error);
 
-      // Auth required
       expect(() =>
         Socks5Tunnel.verifyAuthResponse(new Uint8Array([0x05, 0xff]))
       ).toThrow(Socks5Error);
@@ -35,10 +32,10 @@ describe('Tor Network Modules', () => {
       const port = 8080;
       const connectReq = Socks5Tunnel.buildConnectRequest(onionHost, port);
 
-      expect(connectReq[0]).toBe(0x05); // SOCKS5
-      expect(connectReq[1]).toBe(0x01); // CONNECT
-      expect(connectReq[2]).toBe(0x00); // RSV
-      expect(connectReq[3]).toBe(0x03); // ATYP: DOMAINNAME
+      expect(connectReq[0]).toBe(0x05);
+      expect(connectReq[1]).toBe(0x01);
+      expect(connectReq[2]).toBe(0x00);
+      expect(connectReq[3]).toBe(0x03);
       expect(connectReq[4]).toBe(onionHost.length);
 
       const domainInPacket = new TextDecoder().decode(
@@ -52,21 +49,18 @@ describe('Tor Network Modules', () => {
     });
 
     it('verifies SOCKS5 connect response and throws descriptive errors on failure', () => {
-      // Success (0x00)
       expect(() =>
         Socks5Tunnel.verifyConnectResponse(
           new Uint8Array([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
         )
       ).not.toThrow();
 
-      // Host unreachable (0x04)
       expect(() =>
         Socks5Tunnel.verifyConnectResponse(
           new Uint8Array([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
         )
       ).toThrow('Host unreachable');
 
-      // Connection refused (0x05)
       expect(() =>
         Socks5Tunnel.verifyConnectResponse(
           new Uint8Array([0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
@@ -102,7 +96,6 @@ describe('Tor Network Modules', () => {
     beforeAll(async () => {
       testIdentity = await IdentityManager.generateIdentity();
 
-      // Create a lightweight mock relay server matching our Rust Axum backend protocol
       mockServer = http.createServer((req, res) => {
         if (req.method === 'GET' && req.url === '/health') {
           res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -135,7 +128,6 @@ describe('Tor Network Modules', () => {
         socket.on('close', () => activeSockets.delete(socket));
       });
 
-      // Handle WebSocket upgrade
       mockServer.on('upgrade', (req, socket: net.Socket, head) => {
         activeSockets.add(socket);
         socket.on('close', () => activeSockets.delete(socket));
@@ -154,12 +146,10 @@ describe('Tor Network Modules', () => {
               `Sec-WebSocket-Accept: ${acceptKey}\r\n\r\n`
           );
 
-          // 1. Send Challenge
           const challengeHex = '11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff';
           const challengeMsg = JSON.stringify({ type: 'challenge', challenge: challengeHex });
           sendWsFrame(socket, challengeMsg);
 
-          // 2. Await Client Auth
           let buffer = Buffer.alloc(0);
           socket.on('data', (chunk: Buffer) => {
             buffer = Buffer.concat([buffer, chunk]);
@@ -200,7 +190,6 @@ describe('Tor Network Modules', () => {
 
               const clientMsg = JSON.parse(payload.toString('utf8'));
               if (clientMsg.type === 'auth') {
-                // Verify signature
                 const isValid = IdentityManager.verifySignature(
                   challengeHex,
                   clientMsg.signature,
@@ -215,7 +204,6 @@ describe('Tor Network Modules', () => {
                     JSON.stringify({ type: 'authenticated', recipient_pubkey_hash: hash })
                   );
 
-                  // Send test message
                   sendWsFrame(
                     socket,
                     JSON.stringify({
@@ -241,7 +229,7 @@ describe('Tor Network Modules', () => {
     });
 
     afterAll(async () => {
-      for (const socket of activeSockets) {
+      for (const socket of Array.from(activeSockets)) {
         socket.destroy();
       }
       activeSockets.clear();
@@ -259,11 +247,9 @@ describe('Tor Network Modules', () => {
 
       const httpClient = new TorHttpClient(config);
 
-      // Health check
       const isHealthy = await httpClient.checkHealth();
       expect(isHealthy).toBe(true);
 
-      // Send message envelope
       const response = await httpClient.sendMessage({
         recipient_pubkey_hash: testIdentity.recipientPubkeyHash,
         encrypted_payload: 'BLOB_FOR_TEST',
@@ -320,7 +306,7 @@ function sendWsFrame(socket: net.Socket, text: string) {
 
   if (len <= 125) {
     header = Buffer.alloc(2);
-    header[0] = 0x81; // FIN + Text opcode
+    header[0] = 0x81;
     header[1] = len;
   } else if (len <= 0xffff) {
     header = Buffer.alloc(4);
@@ -336,4 +322,3 @@ function sendWsFrame(socket: net.Socket, text: string) {
 
   socket.write(Buffer.concat([header, payload]));
 }
-

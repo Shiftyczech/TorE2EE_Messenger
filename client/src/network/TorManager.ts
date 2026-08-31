@@ -42,10 +42,6 @@ export class TorManager {
     return this.status === TorStatus.READY;
   }
 
-  /**
-   * Starts the local Tor daemon or initializes connection to the running Tor proxy.
-   * Reports bootstrap progress from 0% to 100%.
-   */
   public async startTor(
     onProgress?: (progress: TorBootstrapProgress) => void
   ): Promise<boolean> {
@@ -62,7 +58,6 @@ export class TorManager {
 
     this.status = TorStatus.BOOTSTRAPPING;
 
-    // In devMode (or when running tests directly against local server)
     if (this.config.devMode) {
       this.bootstrapPercentage = 100;
       this.status = TorStatus.READY;
@@ -77,17 +72,13 @@ export class TorManager {
     }
 
     try {
-      // Dynamic import of react-native-tor for mobile environments
       let ReactNativeTor: any = null;
       try {
         ReactNativeTor = require('react-native-tor');
-      } catch {
-        // Fallback for Node test/desktop environments
-      }
+      } catch {}
 
       if (ReactNativeTor && typeof ReactNativeTor.default === 'function') {
         this.nativeTorInstance = ReactNativeTor.default();
-
         if (onProgress) {
           onProgress({
             percentage: 10,
@@ -95,13 +86,9 @@ export class TorManager {
             isReady: false,
           });
         }
-
-        // Start daemon
         await this.nativeTorInstance.startIfNotStarted();
-
         this.bootstrapPercentage = 100;
         this.status = TorStatus.READY;
-
         if (onProgress) {
           onProgress({
             percentage: 100,
@@ -111,7 +98,6 @@ export class TorManager {
         }
         return true;
       } else {
-        // Assume external Tor daemon is running on socksProxyPort (127.0.0.1:9050)
         this.bootstrapPercentage = 100;
         this.status = TorStatus.READY;
         if (onProgress) {
@@ -138,16 +124,11 @@ export class TorManager {
     }
   }
 
-  /**
-   * Stops the Tor daemon.
-   */
   public async stopTor(): Promise<void> {
     if (this.nativeTorInstance && typeof this.nativeTorInstance.stop === 'function') {
       try {
         await this.nativeTorInstance.stop();
-      } catch {
-        // Ignore
-      }
+      } catch {}
     }
     this.status = TorStatus.STOPPED;
     this.bootstrapPercentage = 0;

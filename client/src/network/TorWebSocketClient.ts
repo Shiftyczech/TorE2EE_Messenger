@@ -50,9 +50,6 @@ export class TorWebSocketClient {
     }
   }
 
-  /**
-   * Connects to the Relay Server's WebSocket stream over Tor.
-   */
   public async connect(): Promise<void> {
     if (
       this.state === WsClientState.CONNECTING ||
@@ -65,7 +62,6 @@ export class TorWebSocketClient {
     this.setState(WsClientState.CONNECTING);
 
     try {
-      // 1. Establish TCP socket via SOCKS5 proxy (or direct if devMode)
       if (this.config.devMode) {
         this.socket = await new Promise<net.Socket>((resolve, reject) => {
           const s = net.createConnection(
@@ -84,11 +80,9 @@ export class TorWebSocketClient {
         );
       }
 
-      // 2. Perform HTTP Upgrade to WebSocket
       const leftover = await this.performWebSocketUpgrade();
       this.setState(WsClientState.AWAITING_CHALLENGE);
 
-      // 3. Setup WebSocket frame processing
       this.setupSocketHandlers();
 
       if (leftover && leftover.length > 0) {
@@ -101,10 +95,6 @@ export class TorWebSocketClient {
     }
   }
 
-  /**
-   * Performs the HTTP -> WebSocket upgrade handshake (RFC 6455).
-   * Returns any leftover bytes after the HTTP headers.
-   */
   private performWebSocketUpgrade(): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       if (!this.socket) {
@@ -171,9 +161,6 @@ export class TorWebSocketClient {
     });
   }
 
-  /**
-   * Parses RFC 6455 frames from the raw byte stream.
-   */
   private handleRawData(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
@@ -181,7 +168,6 @@ export class TorWebSocketClient {
       const firstByte = this.buffer[0];
       const secondByte = this.buffer[1];
 
-      const _fin = (firstByte & 0x80) !== 0;
       const opcode = firstByte & 0x0f;
       const isMasked = (secondByte & 0x80) !== 0;
       let payloadLen = secondByte & 0x7f;
@@ -205,7 +191,7 @@ export class TorWebSocketClient {
       }
 
       if (this.buffer.length < offset + payloadLen) {
-        return; // Wait for full frame
+        return;
       }
 
       let payload = this.buffer.subarray(offset, offset + payloadLen);
@@ -225,26 +211,23 @@ export class TorWebSocketClient {
 
   private processFrame(opcode: number, payload: Buffer): void {
     switch (opcode) {
-      case 0x01: // Text frame
+      case 0x01:
         const text = payload.toString('utf8');
         this.handleTextMessage(text);
         break;
-      case 0x08: // Close frame
+      case 0x08:
         this.disconnect();
         break;
-      case 0x09: // Ping frame -> send Pong
+      case 0x09:
         this.sendRawFrame(0x0a, payload);
         break;
-      case 0x0a: // Pong frame
+      case 0x0a:
         break;
       default:
         break;
     }
   }
 
-  /**
-   * Handles high-level TorE2EE protocol JSON messages.
-   */
   private handleTextMessage(text: string): void {
     try {
       const msg: ServerWsMessage = JSON.parse(text);
@@ -277,14 +260,9 @@ export class TorWebSocketClient {
           }
           break;
       }
-    } catch {
-      // Ignore malformed JSON
-    }
+    } catch {}
   }
 
-  /**
-   * Handles the authentication challenge by signing it with Ed25519 and replying.
-   */
   private handleServerChallenge(challengeHex: string): void {
     try {
       this.setState(WsClientState.AUTHENTICATING);
@@ -306,23 +284,17 @@ export class TorWebSocketClient {
     }
   }
 
-  /**
-   * Sends a JSON object wrapped in a masked RFC 6455 text frame.
-   */
   public sendJson(data: object): void {
     const jsonStr = JSON.stringify(data);
     const payloadBytes = Buffer.from(jsonStr, 'utf8');
     this.sendRawFrame(0x01, payloadBytes);
   }
 
-  /**
-   * Sends a client-masked WebSocket frame (RFC 6455 mandates client-to-server masking).
-   */
   private sendRawFrame(opcode: number, payload: Buffer): void {
     if (!this.socket || this.socket.destroyed) return;
 
     const payloadLen = payload.length;
-    let headerLen = 2 + 4; // 2 byte base + 4 byte mask key
+    let headerLen = 2 + 4;
     if (payloadLen > 125 && payloadLen <= 0xffff) {
       headerLen += 2;
     } else if (payloadLen > 0xffff) {
@@ -330,11 +302,11 @@ export class TorWebSocketClient {
     }
 
     const frame = Buffer.alloc(headerLen + payloadLen);
-    frame[0] = 0x80 | (opcode & 0x0f); // FIN = 1, Opcode
+    frame[0] = 0x80 | (opcode & 0x0f);
 
     let offset = 2;
     if (payloadLen <= 125) {
-      frame[1] = 0x80 | payloadLen; // Mask = 1
+      frame[1] = 0x80 | payloadLen;
     } else if (payloadLen <= 0xffff) {
       frame[1] = 0x80 | 126;
       frame.writeUInt16BE(payloadLen, 2);
@@ -409,9 +381,6 @@ export class TorWebSocketClient {
     this.buffer = Buffer.alloc(0);
   }
 
-  /**
-   * Explicitly closes the WebSocket connection and halts automatic reconnection.
-   */
   public disconnect(): void {
     this.autoReconnect = false;
     this.cleanupTimers();
