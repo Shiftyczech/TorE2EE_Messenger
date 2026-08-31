@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "server",
+    "tester-cli",
+]
+resolver = "2"

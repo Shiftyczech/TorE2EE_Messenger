@@ -1,0 +1,22 @@
+# Rust
+/target
+Cargo.lock
+**/*.rs.bk
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Tor keys & state
+/tor_data
+/hidden_service
+
+# Node / React Native
+node_modules/
+.expo/
+dist/
+build/
+.env
+.env.local
+*.log
