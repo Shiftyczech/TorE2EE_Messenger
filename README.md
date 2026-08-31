@@ -1,6 +1,6 @@
 # TorE2EE Messenger
 
-Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**) a **Zero-Knowledge backend relay serverem v Rustu**.
+Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu**.
 
 ---
 
@@ -16,11 +16,11 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
  │  │  ChatList, ChatDetail)  │   │  (Sync, Events, Dispatch)│   │   AEAD Secretbox)      │ │
  │  └─────────────────────────┘   └────────────┬─────────────┘   └───────────┬────────────┘ │
  │                                             │                             │              │
- │  ┌─────────────────────────┐   ┌────────────▼─────────────┐               │              │
- │  │    Identity Manager     │   │      SQLCipher Store     │◄──────────────┘              │
- │  │  (BIP-39, Ed25519 Sign, │   │  (Encrypted DB, Messages,│                              │
- │  │   Curve25519, Keychain) │   │   Contacts, SignalStore) │                              │
- │  └─────────────────────────┘   └──────────────────────────┘                              │
+ │  ┌─────────────────────────┐   ┌────────────▼─────────────┐   ┌───────────▼────────────┐ │
+ │  │  Background Sync Task   │   │      SQLCipher Store     │   │   Local Notifications  │ │
+ │  │ (Headless 25s, No FCM,  │◄─►│  (Encrypted DB, Messages,│◄─►│  (@notifee, Priority,  │ │
+ │  │  Periodic Wakeup ~15m)  │   │   Contacts, SignalStore) │   │   Privacy Lockscreen)  │ │
+ │  └─────────────────────────┘   └────────────┬─────────────┘   └────────────────────────┘ │
  │                                             │                                            │
  │                                ┌────────────▼─────────────┐                              │
  │                                │     Tor Network Bridge   │                              │
@@ -54,9 +54,10 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
    - **Double Ratchet:** Asymetrický DH ratchet s Curve25519 efemérními klíči při každé odpovědi (Break-in Recovery) kombinovaný se symetrickým KDF ratchetem pro každou zprávu (Forward Secrecy).
    - **AEAD šifrování:** `tweetnacl.secretbox` (XSalsa20-Poly1305) s okamžitým nulováním klíčů v paměti (`fill(0)`).
    - **Out-of-Order Handling:** Bezpečné ukládání přeskočených klíčů pro zprávy doručené mimo pořadí.
-4. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá síťová komunikace (HTTP POST pro odesílání i WebSocket pro příjem) je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`). Nesmí dojít k žádnému clearnet úniku.
+4. **Strikní Tor Transport (Zero DNS / IP Leak):** Veškerá síťová komunikace (HTTP POST pro odesílání i WebSocket pro příjem) je povinně směrována přes lokální SOCKS5 proxy s doménovým adresováním (`ATYP 0x03`).
 5. **SQLCipher šifrované lokální úložiště:** Lokální databáze SQLite je šifrována 256bitovým náhodným klíčem uloženým výhradně v hardwarovém `react-native-keychain`. Databáze neběží v prostém textu a veškeré dotazy jsou striktně parametrizované (`?`).
-6. **Out-of-Band výměna kontaktů:** Kompaktní QR kód / URI (`tore2ee://contact?v=1&d=...`) s kryptografickou validací Ed25519 podpisu Signed PreKey.
+6. **Zero Push Metadata Leak (Background Sync bez FCM/APNs):** Synchronizace na pozadí probíhá periodickým headless probouzením bez centrálních push notifikací Google FCM nebo Apple APNs.
+7. **Out-of-Band výměna kontaktů:** Kompaktní QR kód / URI (`tore2ee://contact?v=1&d=...`) s kryptografickou validací Ed25519 podpisu Signed PreKey.
 
 ---
 
@@ -72,43 +73,22 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 
 ---
 
-### Fáze 2: Klientská Aplikace (React Native / TypeScript)
+### Fáze 2: Klientská Aplikace (React Native / TypeScript) (Dokončeno)
+- **Milník 2.1: Modul Identity (`client/src/identity/`):** `IdentityManager.ts` (BIP-39, Ed25519, Curve25519, Keychain).
+- **Milník 2.2: Tor Bridge & Síťový Klient (`client/src/network/`):** `Socks5Tunnel.ts`, `TorManager.ts`, `TorHttpClient.ts`, `TorWebSocketClient.ts`.
+- **Milník 2.3: E2EE Engine (`client/src/crypto/`):** `CryptoEngine.ts` (Double Ratchet + X3DH), `ISignalStore.ts`, `InMemorySignalStore.ts`.
+- **Milník 2.4: Lokální Šifrovaná Databáze (`client/src/storage/`):** `DatabaseManager.ts` (SQLCipher), `SqliteSignalStore.ts`, `ContactRepository.ts`, `MessageRepository.ts`.
+- **Milník 2.5: Výměna Klíčů a Orchestrace (`client/src/orchestration/`):** `ContactExchange.ts` (QR URI validace), `AppOrchestrator.ts`.
+- **Milník 2.6: UI/UX, Navigace a React State Management (`client/src/ui/`):** `theme.ts` (Cyber Dark Mode), `OrchestratorContext.tsx`, znovupoužitelné komponenty (`TorStatusBadge`, `MessageBubble`, `ContactListItem`...) a obrazovky (`Welcome`, `SeedDisplay`, `RestoreSeed`, `ChatList`, `Chat`, `Profile`, `Scanner`).
 
-#### Milník 2.1: Modul Identity (`client/src/identity/`)
-- `IdentityManager.ts`: Generování a obnova BIP-39 mnemonic, odvození Ed25519 a Curve25519 klíčů, výpočet mailbox hashe, podepisování výzev a hardwarová integrace s `react-native-keychain`.
+---
 
-#### Milník 2.2: Tor Bridge & Síťový Klient (`client/src/network/`)
-- `Socks5Tunnel.ts`: Nízkoúrovňová implementace SOCKS5 RFC 1928 soketového tunelu s doménovým adresováním eliminující úniky DNS dotazů.
-- `TorManager.ts`: Správce životního cyklu Tor démona s hlášením průběhu bootstrapu (0–100 %).
-- `TorHttpClient.ts`: Tunelovaný HTTP klient pro blind-drop odesílání zpráv.
-- `TorWebSocketClient.ts`: Tunelovaný WebSocket klient s automatickou Ed25519 challenge-response autentizací, ping keep-alive a exponenciálním auto-reconnectem.
+### Fáze 3: Pokročilé Mobilní Funkce a Produkční Zabezpečení
 
-#### Milník 2.3: E2EE Engine (Signal Protocol / Double Ratchet + X3DH) (`client/src/crypto/`)
-- `CryptoEngine.ts`: Kompletní implementace X3DH klíčové dohody ($DH_1, DH_2, DH_3, DH_4$), Master Secret HKDF-SHA256, asymetrického a symetrického Double Ratchetu a správy zpráv doručených mimo pořadí.
-- `ISignalStore.ts` & `InMemorySignalStore.ts`: Modulární rozhraní a in-memory adaptér pro správu kryptografického stavu.
-
-#### Milník 2.4: Lokální Šifrovaná Databáze (`client/src/storage/`)
-- `DatabaseManager.ts`: Správa šifrované databáze SQLCipher s 256bitovým klíčem v Keychain, WAL režimem a verzovanými migracemi schématu v1.
-- `SqliteSignalStore.ts`: Persistentní SQLite adaptér implementující `ISignalStore` pro ukládání relací, Signed PreKeys a One-Time PreKeys.
-- `ContactRepository.ts` & `MessageRepository.ts`: Repozitáře pro správu adresáře kontaktů a dešifrované historie zpráv.
-
-#### Milník 2.5: Výměna Klíčů a Orchestrace Zpráv (`client/src/orchestration/`)
-- `ContactExchange.ts`: Kompaktní Base64/URI formát pro QR kódy s Ed25519 kryptografickou kontrolou integrity Signed PreKey proti MITM útokům.
-- `AppOrchestrator.ts`: Centrální kontroler sjednocující síťové klienty, kryptografický engine a šifrované úložiště do událostmi řízeného systému pro UI.
-
-#### Milník 2.6: UI/UX, Navigace a React State Management (`client/src/ui/`)
-- `theme.ts`: Moderní kyberbezpečnostní Dark Mode paleta (`#0D1117`, `#161B22`, akcent `#10B981`).
-- `OrchestratorContext.tsx`: Reaktivní React Context a hook `useOrchestrator()` propojující UI přímo s orchestrátorem bez zasekávání UI vlákna.
-- `components/`: Znovupoužitelné komponenty (`TorStatusBadge`, `MessageBubble`, `ContactListItem`, `ScreenContainer`, `Button`, `Input`).
-- `screens/`:
-  - `WelcomeScreen.tsx`: Vytvoření / obnova identity.
-  - `SeedDisplayScreen.tsx`: Mřížka 12 slov seedu s bezpečnostním varováním a potvrzením.
-  - `RestoreSeedScreen.tsx`: Zadání seedu pro obnovení.
-  - `ChatListScreen.tsx`: Seznam konverzací s živým indikátorem stavu Toru a FAB pro skenování.
-  - `ChatScreen.tsx`: Aktivní chat s real-time odesíláním a příjmem bublin zpráv.
-  - `ProfileScreen.tsx`: Zobrazení vlastního QR kódu (`exportContactUri`) a bezpečné odhlášení.
-  - `ScannerScreen.tsx`: Hledáček pro skenování QR kódu / vložení URI kontaktu.
-- `RootNavigator.tsx`: Stavová navigace přepínající mezi Onboardingem a Hlavní aplikací podle existence identity v Keychain.
+#### Milník 3.1: Background Sync & Local Notifications (`client/src/background/`, `client/src/notifications/`) (Dokončeno)
+- `NotificationManager.ts`: Správa nativních lokálních notifikací `@notifee/react-native` s vysokou prioritou, vibracemi a podporou `privacyMode`.
+- `BackgroundSyncService.ts`: Headless background synchronizační worker s přísným časovým limitem (max 25s) a `Promise.race()` timeoutem (20s) pro bezpečný Tor bootstrap a okamžité dešifrování zpráv bez zablokování UI.
+- `BackgroundSyncTask.ts`: Registrace headless úlohy pro `react-native-background-fetch`.
 
 ---
 
@@ -134,11 +114,8 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 │   │   ├── storage/             # SQLCipher DatabaseManager, SqliteSignalStore, Repozitáře
 │   │   ├── orchestration/       # ContactExchange (QR URI), AppOrchestrator
 │   │   ├── ui/                  # UI Theme, Context, Komponenty, Obrazovky a RootNavigator
-│   │   │   ├── components/      # TorStatusBadge, MessageBubble, ContactListItem, Button...
-│   │   │   ├── context/         # OrchestratorContext, useOrchestrator hook
-│   │   │   ├── navigation/      # RootNavigator
-│   │   │   ├── screens/         # Welcome, SeedDisplay, RestoreSeed, ChatList, Chat, Profile, Scanner
-│   │   │   └── theme.ts         # Dark Mode kyberbezpečnostní paleta
+│   │   ├── notifications/       # NotificationManager (@notifee lokální notifikace)
+│   │   ├── background/          # BackgroundSyncService, BackgroundSyncTask
 │   │   └── index.ts             # Centrální exportní bod klientské knihovny
 │   ├── jest.config.js           # Konfigurace testů Jest + ts-jest
 │   ├── package.json             # Klientské závislosti a skripty
@@ -155,12 +132,12 @@ Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor 
 
 V adresáři `client/`:
 
-1. **Spuštění všech testovacích sad (34 unit a integračních testů):**
+1. **Spuštění všech testovacích sad (39 unit a integračních testů):**
    ```bash
    cd client
    npm test
    ```
-   *Pokrývá: IdentityManager, SOCKS5 tunel, Tor HttpClient/WebSocket, Double Ratchet E2EE, SQLCipher persistenci, ContactExchange QR ověřování, AppOrchestrator integrační simulaci a UI komponenty.*
+   *Pokrývá: IdentityManager, SOCKS5 tunel, Tor HttpClient/WebSocket, Double Ratchet E2EE, SQLCipher persistenci, ContactExchange QR ověřování, AppOrchestrator, UI komponenty, NotificationManager a BackgroundSyncService.*
 
 2. **Striktní kontrola typů TypeScriptu:**
    ```bash

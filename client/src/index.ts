@@ -39,3 +39,10 @@ export * from './ui/screens/ChatScreen';
 export * from './ui/screens/ProfileScreen';
 export * from './ui/screens/ScannerScreen';
 export * from './ui/navigation/RootNavigator';
+
+export * from './notifications/types';
+export * from './notifications/NotificationManager';
+
+export * from './background/types';
+export * from './background/BackgroundSyncService';
+export * from './background/BackgroundSyncTask';
