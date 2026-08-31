@@ -1,0 +1,58 @@
+export const Theme = {
+  colors: {
+    background: '#0D1117',
+    surface: '#161B22',
+    surfaceSecondary: '#21262D',
+    border: '#30363D',
+    borderLight: '#484F58',
+    primary: '#10B981', // Neon cyber emerald
+    primaryDark: '#059669',
+    primaryLight: '#34D399',
+    primaryGlow: 'rgba(16, 185, 129, 0.2)',
+    textPrimary: '#F0F6FC',
+    textSecondary: '#8B949E',
+    textMuted: '#6E7681',
+    danger: '#F85149',
+    dangerSurface: 'rgba(248, 81, 73, 0.15)',
+    warning: '#F59E0B',
+    warningSurface: 'rgba(245, 158, 11, 0.15)',
+    info: '#38BDF8',
+    bubbleOutgoing: '#064E3B',
+    bubbleOutgoingBorder: '#059669',
+    bubbleIncoming: '#1F2937',
+    bubbleIncomingBorder: '#374151',
+  },
+  typography: {
+    familySans: 'System',
+    familyMono: 'monospace',
+    sizes: {
+      xs: 11,
+      sm: 13,
+      md: 15,
+      lg: 18,
+      xl: 22,
+      xxl: 28,
+    },
+    weights: {
+      regular: '400' as const,
+      medium: '500' as const,
+      semibold: '600' as const,
+      bold: '700' as const,
+    },
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 24,
+    xxl: 32,
+  },
+  radius: {
+    sm: 6,
+    md: 10,
+    lg: 16,
+    full: 9999,
+  },
+};
+
