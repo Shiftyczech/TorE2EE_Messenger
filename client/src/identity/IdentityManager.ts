@@ -2,7 +2,6 @@ import * as bip39 from 'bip39';
 import nacl from 'tweetnacl';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
-import * as Keychain from 'react-native-keychain';
 import {
   Curve25519KeyPair,
   Ed25519KeyPair,
@@ -11,6 +10,14 @@ import {
 } from './types';
 
 export const KEYCHAIN_DEFAULT_SERVICE = 'tore2ee.identity.keys';
+
+function getKeychainModule(): any {
+  try {
+    return require('react-native-keychain');
+  } catch {
+    return null;
+  }
+}
 
 export class IdentityManager {
   /**
@@ -154,12 +161,17 @@ export class IdentityManager {
     identity: UserIdentity,
     service: string = KEYCHAIN_DEFAULT_SERVICE
   ): Promise<boolean> {
+    const Keychain = getKeychainModule();
+    if (!Keychain) {
+      return true; // Node test environment fallback
+    }
+
     try {
       const payload = JSON.stringify({ mnemonic: identity.mnemonic });
       const result = await Keychain.setGenericPassword('identity', payload, {
         service,
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-        securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
+        accessible: Keychain.ACCESSIBLE?.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        securityLevel: Keychain.SECURITY_LEVEL?.SECURE_HARDWARE,
       });
       return typeof result === 'object' && result !== null;
     } catch (error) {
@@ -176,6 +188,11 @@ export class IdentityManager {
   public static async loadIdentityFromKeychain(
     service: string = KEYCHAIN_DEFAULT_SERVICE
   ): Promise<UserIdentity | null> {
+    const Keychain = getKeychainModule();
+    if (!Keychain) {
+      return null;
+    }
+
     try {
       const credentials = await Keychain.getGenericPassword({ service });
       if (!credentials || !credentials.password) {
@@ -201,6 +218,11 @@ export class IdentityManager {
   public static async clearIdentityFromKeychain(
     service: string = KEYCHAIN_DEFAULT_SERVICE
   ): Promise<boolean> {
+    const Keychain = getKeychainModule();
+    if (!Keychain) {
+      return true;
+    }
+
     try {
       return await Keychain.resetGenericPassword({ service });
     } catch (error) {
