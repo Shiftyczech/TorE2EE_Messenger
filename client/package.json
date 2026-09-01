@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "test": "jest --verbose",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:android": "cd android && ./gradlew clean && ./gradlew assembleRelease",
+    "install:android": "adb install -r android/app/build/outputs/apk/release/app-release.apk"
   },
   "dependencies": {
     "@noble/hashes": "^1.4.0",

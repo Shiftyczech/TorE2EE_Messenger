@@ -49,3 +49,5 @@ export * from './background/BackgroundSyncTask';
 
 export * from './devices/types';
 export * from './devices/DeviceLinkManager';
+
+export * from './native/BatteryOptimization';

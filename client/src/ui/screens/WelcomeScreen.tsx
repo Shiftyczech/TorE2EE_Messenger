@@ -4,6 +4,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { useOrchestrator } from '../context/OrchestratorContext';
 import { Theme } from '../theme';
 import { NavigationProp } from '../types';
+import { BatteryOptimizationManager } from '../../native/BatteryOptimization';
 
 export interface WelcomeScreenProps {
   navigation: NavigationProp;
@@ -12,6 +13,36 @@ export interface WelcomeScreenProps {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
   const { createIdentity } = useOrchestrator();
   const [loading, setLoading] = React.useState(false);
+  const [showBatteryModal, setShowBatteryModal] = React.useState(false);
+
+  React.useEffect(() => {
+    const checkBatteryOptimization = async () => {
+      try {
+        const isIgnoring = await BatteryOptimizationManager.isIgnoringBatteryOptimizations();
+        if (!isIgnoring) {
+          setShowBatteryModal(true);
+        }
+      } catch (e) {
+        console.warn('Could not check battery optimization status:', e);
+      }
+    };
+
+    checkBatteryOptimization();
+  }, []);
+
+  const handleRequestBatteryOptimization = async () => {
+    try {
+      await BatteryOptimizationManager.requestIgnoreBatteryOptimizations();
+    } catch (e) {
+      console.warn('Failed to trigger battery optimization dialog:', e);
+    } finally {
+      setShowBatteryModal(false);
+    }
+  };
+
+  const handleDismissBatteryModal = () => {
+    setShowBatteryModal(false);
+  };
 
   const handleCreateIdentity = async () => {
     setLoading(true);
@@ -24,7 +55,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
   };
 
   return (
-    <ScreenContainer style={{ justifyContent: 'center', padding: Theme.spacing.xl }}>
+    <ScreenContainer style={{ justifyContent: 'center', padding: Theme.spacing.xl, position: 'relative' }}>
       <div
         style={{
           display: 'flex',
@@ -106,7 +137,115 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ navigation }) => {
           variant="secondary"
         />
       </div>
+
+      {/* Battery Optimization Modal */}
+      {showBatteryModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.82)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: Theme.spacing.lg,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: Theme.colors.surface,
+              border: `1px solid ${Theme.colors.primary}`,
+              borderRadius: Theme.radius.lg,
+              padding: Theme.spacing.xl,
+              maxWidth: 400,
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              textAlign: 'center',
+              boxShadow: `0 0 30px ${Theme.colors.primaryGlow}`,
+              boxSizing: 'border-box',
+            }}
+          >
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: Theme.radius.full,
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                border: `1px solid ${Theme.colors.primary}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 32,
+                marginBottom: Theme.spacing.md,
+              }}
+            >
+              🔋
+            </div>
+
+            <h2
+              style={{
+                fontSize: Theme.typography.sizes.lg,
+                fontWeight: Theme.typography.weights.bold,
+                color: Theme.colors.textPrimary,
+                margin: 0,
+                marginBottom: Theme.spacing.sm,
+              }}
+            >
+              Optimalizace baterie
+            </h2>
+
+            <p
+              style={{
+                fontSize: Theme.typography.sizes.sm,
+                color: Theme.colors.textPrimary,
+                lineHeight: 1.5,
+                margin: 0,
+                marginBottom: Theme.spacing.sm,
+              }}
+            >
+              Abychom mohli bezpečně doručovat zprávy přes anonymní síť Tor, aplikace potřebuje výjimku z optimalizace baterie.
+            </p>
+
+            <p
+              style={{
+                fontSize: Theme.typography.sizes.xs,
+                color: Theme.colors.textSecondary,
+                lineHeight: 1.4,
+                margin: 0,
+                marginBottom: Theme.spacing.xl,
+              }}
+            >
+              Bez této výjimky systém Android uspat proces Tor démona a zprávy nebudou doručovány na pozadí.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: Theme.spacing.sm,
+                width: '100%',
+              }}
+            >
+              <Button
+                title="Povolit"
+                onPress={handleRequestBatteryOptimization}
+                variant="primary"
+              />
+              <Button
+                title="Později"
+                onPress={handleDismissBatteryModal}
+                variant="ghost"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </ScreenContainer>
   );
 };
-

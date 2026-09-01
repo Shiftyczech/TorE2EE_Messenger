@@ -15,7 +15,8 @@ class MainApplication : Application(), ReactApplication {
             override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
             override fun getPackages(): List<ReactPackage> {
-                val packages = PackageList(this).packages
+                val packages = PackageList(this).packages.toMutableList()
+                packages.add(BatteryOptimizationPackage())
                 return packages
             }
 

@@ -1,0 +1,12 @@
+{
+  "name": "tore2ee-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:android": "cd android && ./gradlew clean && ./gradlew assembleRelease",
+    "install:android": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
+    "test": "cd client && npm test",
+    "typecheck": "cd client && npm run typecheck"
+  }
+}
+
