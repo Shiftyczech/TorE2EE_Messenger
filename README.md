@@ -1,4 +1,4 @@
-# TorE2EE Messenger
+# TorE2EE Messenger mnau :3
 
 Ultra-bezpečný, decentralizovaně orientovaný a plně anonymní komunikátor fungující výhradně v síti **Tor (Onion v3)** s **End-to-End šifrováním (Signal Protocol / Double Ratchet + X3DH)**, lokální šifrovanou databází (**SQLCipher**), **Multi-Device podporou (Linked Devices & Self-Sync Messages)**, **Background Syncem bez FCM/APNs** a **Zero-Knowledge backend relay serverem v Rustu** kontejnerizovaným v **Docker Compose (Sidecar pattern)**.
 
